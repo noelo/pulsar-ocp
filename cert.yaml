@@ -1,0 +1,36 @@
+apiVersion: "cert-manager.io/v1"
+kind: Certificate
+metadata:
+  name: "pulsar-tls-proxy"
+  namespace: pulsar
+spec:
+  # Secret names are always required.
+  secretName: "pulsar-tls-proxy"
+  duration: "2160h"
+  renewBefore: "360h"
+  organization:
+  - pulsar
+  # The use of the common name field has been deprecated since 2000 and is
+  # discouraged from being used.
+  commonName: "pulsar-proxy"
+  isCA: false
+  keySize: 4096
+  keyAlgorithm: rsa
+  keyEncoding: pkcs8
+  usages:
+    - server auth
+    - client auth
+  # At least one of a DNS Name, USI SAN, or IP address is required.
+  dnsNames:
+    -  "*.pulsar-proxy.pulsar.svc.cluster.local"
+    -  "pulsar-proxy"
+  # Issuer references are always required.
+  issuerRef:
+    name: "pulsar-internal-cert-issuer-ca-issuer"
+    # We can reference ClusterIssuers by changing the kind here.
+    # The default value is Issuer (i.e. a locally namespaced Issuer)
+    kind: Issuer
+    # This is optional since cert-manager will default to this value however
+    # if you are using an external issuer, change this to that issuer group.
+    group: cert-manager.io
+

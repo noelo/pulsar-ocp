@@ -1,0 +1,151 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  labels:
+    app: pulsar
+    chart: pulsar-2.7.10
+    cluster: pulsar
+    component: pulsar-sql-coord
+    environment: dev
+    heritage: Helm
+    release: pulsar
+  name: pulsar-sql-coord
+spec:
+  podManagementPolicy: Parallel
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: pulsar
+      component: pulsar-sql-coord
+      release: pulsar
+  serviceName: pulsar-sql-coord
+  template:
+    metadata:
+      annotations:
+        prometheus.io/port: "9092"
+        prometheus.io/scrape: "true"
+      labels:
+        app: pulsar
+        cluster: pulsar
+        component: pulsar-sql-coord
+        environment: dev
+        release: pulsar
+    spec:
+      containers:
+      - args:
+        - |
+          bin/apply-config-from-env.py conf/proxy.conf && echo "OK" > status && OPTS="${OPTS} -Dlog4j2.formatMsgNoLookups=true" exec bin/pulsar sql-worker
+        command:
+        - sh
+        - -c
+        env:
+        - name: PULSAR_PRESTO_CONF
+          value: /opt/pulsar-presto/config
+        image: quay.io/noeloc/pulsarsql:latest
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 10
+          httpGet:
+            path: /
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        name: pulsar-sql
+        ports:
+        - containerPort: 8081
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 10
+          httpGet:
+            path: /
+            port: 8081
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 5
+        resources:
+          requests:
+            cpu: 500m
+            memory: 2G
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /pulsar/certs/proxy
+          name: proxy-certs
+          readOnly: true
+        - mountPath: /pulsar/certs/ca
+          name: ca
+          readOnly: true
+        - mountPath: /opt/pulsar-presto/config
+          name: pulsar-sql-coord
+        - mountPath: /opt/pulsar-presto/config/catalog
+          name: pulsar-catalog
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - args:
+        - |-
+          until bin/pulsar zookeeper-shell -server pulsar-zookeeper get /admin/clusters/pulsar; do
+            sleep 3;
+          done;
+        command:
+        - sh
+        - -c
+        image: apachepulsar/pulsar-all:2.7.4
+        imagePullPolicy: IfNotPresent
+        name: wait-zookeeper-ready
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      - args:
+        - |-
+          set -e; brokerServiceNumber="$(nslookup -timeout=10 pulsar-broker | grep Name | wc -l)"; until [ ${brokerServiceNumber} -ge 1 ]; do
+            echo "pulsar cluster pulsar isn't initialized yet ... check in 10 seconds ...";
+            sleep 10;
+            brokerServiceNumber="$(nslookup -timeout=10 pulsar-broker | grep Name | wc -l)";
+          done;
+        command:
+        - sh
+        - -c
+        image: apachepulsar/pulsar-all:2.7.4
+        imagePullPolicy: IfNotPresent
+        name: wait-broker-ready
+        resources: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: ca
+        secret:
+          defaultMode: 420
+          items:
+          - key: ca.crt
+            path: ca.crt
+          secretName: pulsar-ca-tls
+      - name: proxy-certs
+        secret:
+          defaultMode: 420
+          items:
+          - key: tls.crt
+            path: tls.crt
+          - key: tls.key
+            path: tls.key
+          secretName: pulsar-tls-proxy
+      - configMap:
+          defaultMode: 420
+          name: pulsar-sql-coord
+        name: pulsar-sql-coord
+      - configMap:
+          defaultMode: 420
+          name: pulsar-sql-catalog
+        name: pulsar-catalog
+  updateStrategy:
+    type: RollingUpdate

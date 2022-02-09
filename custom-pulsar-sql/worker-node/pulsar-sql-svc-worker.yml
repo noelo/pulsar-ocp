@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: pulsar
+    chart: pulsar-2.7.10
+    cluster: pulsar
+    component: pulsar-sql-worker
+    environment: dev
+    heritage: Helm
+    release: pulsar
+  name: pulsar-sql-worker
+spec:
+  ports:
+  - name: http
+    port: 8081
+    protocol: TCP
+    targetPort: 8081
+  selector:
+    app: pulsar
+    component: pulsar-sql-worker
+    release: pulsar
+  sessionAffinity: None
+  type: LoadBalancer
+status:
+  loadBalancer: {}
