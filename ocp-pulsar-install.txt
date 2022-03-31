@@ -1,8 +1,16 @@
 helm repo add apachepulsar https://pulsar.apache.org/charts
 helm repo update
 helm show values apachepulsar/pulsar > pulsar-values.yaml
+
+Create pulsar project
+Add cert-manager 1.6.1+
 oc adm policy add-scc-to-user anyuid -z default -z pulsar-broker-acct -z pulsar-functions-worker -z pulsar-prometheus -z pulsar-bookie -z pulsar-zookeeper -z pulsar-proxy -n pulsar
 helm install pulsar apachepulsar/pulsar -f pulsar-values-dev.yaml --timeout 10m 
+
+*** NOTE : The Pulsar helm chart has issues with the cer-manager resources. See https://github.com/apache/pulsar/issues/14547
+If this is an issue during the helm install phase
+[1] helm template --debug pulsar apachepulsar/pulsar -f pulsar-values-dev.yaml > render.yaml
+[2] edit the render.yaml to fix the cert definitions and the use oc apply to install the render.yaml
 
 oc expose svc pulsar-grafana
 oc get secret -o yaml pulsar-grafana-secret
@@ -10,9 +18,14 @@ oc expose svc pulsar-pulsar-manager
 oc create route passthrough sslproxy-route --service=pulsar-proxy --port=6651
 
 
+Configure Pulsar Manager - service url = http://pulsar-broker:8080
+
+Get the SSL certificate to connect to the proxy 
+openssl s_client -showcerts -servername sslproxy-route-pulsar.apps.ocp.themadgrape.com -connect sslproxy-route-pulsar.apps.ocp.themadgrape.com:443
+
+
 Install Presto cluster
 ---------------------
-
 cd config
 oc create cm pulsar-sql-catalog --from-file=pulsar.properties
 
@@ -27,6 +40,37 @@ oc create cm pulsar-sql-worker --from-file=jvm.config --from-file=log.properties
 oc apply -f pulsar-sql-ss-worker.yaml 
 oc apply -f pulsar-sql-svc-worker.yml 
 
+
+oc rsh pulsar-toolset-0 ./bin/pulsar sql --server pulsar-sql-coord:8081
+./bin/pulsar sql --server pulsar-sql-coord:8081
+SELECT * FROM system.runtime.nodes;
+show catalogs;
+show schemas in pulsar;
+show tables in pulsar."public/default";
+select count(*) from pulsar."public/default".prices;
+history;
+show columns  from pulsar."public/default".prices;
+select max(price) from pulsar."public/default".prices;
+select * from pulsar."public/default".prices group by currency limit 1 order by price desc;
+select currency,count(currency)  from pulsar."public/default".prices group by currency;
+select currency,count(currency) as ccount  from pulsar."public/default".prices group by currency order by ccount;
+select currency,count(currency) as ccount  from pulsar."public/default".prices group by currency order by ccount desc;
+select currency,count(currency) as ccount, avg(price) as price  from pulsar."public/default".prices group by currency order by ccount desc;
+select currency,count(currency) as ccount, avg(price) as price, round(sum(price),1) as total  from pulsar."public/default".prices group by currency order by total  desc;
+select * from pulsar."public/default".prices where  __event_time__ > timestamp '2018-02-09 16:44:15.000' order by __event_time__ asc;
+
+********************
+* Pulsar Functions *
+********************
+oc cp function/target/demo-pulsar-function-1.0-SNAPSHOT.jar pulsar-toolset-0:/tmp
+
+oc rsh pulsar-toolset-0 /pulsar/bin/pulsar-admin functions create --tenant public --namespace default --name symbolrouter --inputs prices --classname org.example.pulsar.functions.SymbolRouter --jar /tmp/demo-pulsar-function-1.0-SNAPSHOT.jar
+
+oc rsh pulsar-toolset-0 /pulsar/bin/pulsar-admin functions list
+/pulsar/bin/pulsar-admin functions get --name symbolrouter
+/pulsar/bin/pulsar-admin functions status --name symbolrouter
+/pulsar/bin/pulsar-admin functions stats --name symbolrouter
+oc rsh pulsar-toolset-0 /pulsar/bin/pulsar-admin functions delete --name symbolrouter
 
 ********************************************************************************************************************
 TRASH : working notes
